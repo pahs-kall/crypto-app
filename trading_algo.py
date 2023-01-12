@@ -8,7 +8,10 @@ from stream.binance_streamer import run_stream
 import csv
 import os
 import time
+import math
+import shutil
 import pandas as pd
+from datetime import datetime
 import websocket
 from threading import Thread
 from binance.helpers import round_step_size
@@ -52,6 +55,7 @@ class TradingBot:
         exchange_info = self.client.get_exchange_info()
         for symbol in exchange_info.get('symbols'):
             print(symbol.get('symbol'), symbol.get('baseAsset'))
+        print()
 
         return exchange_info
 
@@ -69,8 +73,6 @@ class TradingBot:
         # get investment amount for investment percentage
         investment = float(balance['free']) * investment_percentage
 
-        print("asset: ", self.get_asset(symbol))
-
         # get the current price of the symbol
         price = self.client.get_symbol_ticker(symbol=symbol)
 
@@ -80,69 +82,168 @@ class TradingBot:
         return order_size
 
     def track_trades(self):
-      with open('data/order_mapping.csv', 'r') as csvfile:
+      with open('data/trading/order_mapping.csv', 'r') as csvfile:
         reader = csv.reader(csvfile)
         order_mapping = list(reader)
-
+      csvfile.close()
+      
       orders = []
+      symbol = ""
       
       # iterate through orders and check status
       for order in order_mapping:
         if order != []:
           symbol = order[0]
-          try:
-            order_orig = self.client.get_order(symbol=symbol, orderId=order[1])
-            order_sl = self.client.get_order(symbol=symbol, orderId=order[2])
-            order_tp = self.client.get_order(symbol=symbol, orderId=order[3])
-            print(order_orig)
-            print("Order Status: ", order_orig['status'])
-            print("SL Order Status: ", order_sl['status'])
-            print("TP Order Status: ", order_tp['status'])
-          except:
-            try:
-              self.client.cancel_order(symbol=symbol, orderId=order[1])
-            except:
-              pass
-            try:
-              self.client.cancel_order(symbol=symbol, orderId=order[2])
-            except:
-              pass
-            try:
-              self.client.cancel_order(symbol=symbol, orderId=order[3])
-            except:
-              pass
-            
+
+          order_orig = self.client.get_order(symbol=symbol, orderId=int(order[1]))
+          oco_order_low = self.client.get_order(symbol=symbol, orderId=int(order[2]))
+          oco_order_high = self.client.get_order(symbol=symbol, orderId=int(order[3]))
+
+          new_order = [order_orig['orderId'], order_orig['status'], order_orig['origQty'], order_orig['price'], order_orig['side'], oco_order_low['orderId'], oco_order_low['status'], oco_order_high['orderId'], oco_order_high['status']]
+          
+          with open('data/trading/orders_' + symbol + '.csv', 'a+') as csvfile:
+            writer = csv.writer(csvfile)
+            writer.writerow(new_order)
+          csvfile.close()
+
+      print('##########################################################################################')
+      print("##################################  Orders tracked  ######################################")
+      print('##########################################################################################')
+      print()
+
+    def track_profit(self, symbol):
+      with open('data/trading/orders_' + symbol + '.csv', 'r') as csvfile:
+        reader = csv.reader(csvfile)
+        orders = list(reader)
+
+      csvfile.close()
+
+      first_run_done = False
+
+      profit_sum = 0
+
+      # iterate through orders and check status
+      for order in orders:
+        if order != []:
+
+          message = ''
+          profit = 0
+          non_tracked_orders = 0
+
+          order_orig = self.client.get_order(symbol=symbol, orderId=order[0])
+          oco_order_low = self.client.get_order(symbol=symbol, orderId=order[5])
+          oco_order_high = self.client.get_order(symbol=symbol, orderId=order[7])
+
+          if order_orig['status'] == 'FILLED' and order_orig['side'] == 'BUY':
+            if oco_order_low['status'] == 'FILLED':
+              profit = float(oco_order_low['cummulativeQuoteQty']) - float(order_orig['cummulativeQuoteQty'])
+              message = "Loss: " + str(profit) + " trading " + symbol + " on " + order_orig['side'] + " with " + order_orig['price'] + " sold at " + oco_order_low['price']
+            else:
+              non_tracked_orders += 1
+            if oco_order_high['status'] == 'FILLED':
+              profit = float(oco_order_high['cummulativeQuoteQty']) - float(order_orig['cummulativeQuoteQty'])
+              message = "Profit: " + str(profit) + " trading " + symbol + " on " + order_orig['side'] + " with " + order_orig['price'] + " sold at " + oco_order_high['price']
+            else:
+              non_tracked_orders += 1
+          elif order_orig['status'] == 'FILLED' and order_orig['side'] == 'SELL':
+            if oco_order_low['status'] == 'FILLED':
+              profit = float(order_orig['cummulativeQuoteQty']) - float(oco_order_low['cummulativeQuoteQty'])
+              message = "Loss: " + str(profit) + " trading " + symbol + " on " + order_orig['side'] + " with " + order_orig['price'] + " bought at " + oco_order_low['price']
+            else:
+              non_tracked_orders += 1
+            if oco_order_high['status'] == 'FILLED':
+              profit = float(order_orig['cummulativeQuoteQty']) - float(oco_order_high['cummulativeQuoteQty'])
+              message = "Profit: " + str(profit) + " trading " + symbol + " on " + order_orig['side'] + " with " + order_orig['price'] + " bought at " + oco_order_high['price']
+            else:
+              non_tracked_orders += 1
+
+          if non_tracked_orders != 0:
+            return non_tracked_orders
+
+          if message == '':
             return None
 
-          new_order = [order_orig['orderId'], order_orig['status'], order_orig['origQty'], order_orig['price'], order_orig['side'], order_sl['orderId'], order_sl['status'], order_tp['orderId'], order_tp['status']]
-          print(new_order)
+          if profit == 0:
+            return None
 
-          if new_order[1] == 'FILLED':
-            if new_order[6] == 'FILLED':
-              if new_order[8] != 'CANCELLED' and new_order[8] != 'FILLED':
-                self.client.cancel_order(symbol=symbol, orderId=new_order[8])
-              new_order[8] = 'CANCELLED'
-              print("SL order filled - TP order cancelled")
+          # append order to profit history
+          with open('data/trading/profit_history_' + symbol + '.csv', 'a+') as csvfile:
+            writer = csv.writer(csvfile)
+            writer.writerow([message])
+          csvfile.close()
 
-            if new_order[8] == 'FILLED':
-              if new_order[6] != 'CANCELLED' and new_order[6] != 'FILLED':
-                self.client.cancel_order(symbol=symbol, orderId=new_order[6])
-              new_order[6] = 'CANCELLED'
-              print("TP order filled - SL order cancelled")
+          cumulative_profit = 0
 
-          # append order to orders list
-          orders.append(new_order)
+          if not first_run_done:
+            # create file if not exists
+            with open('data/trading/profit_' + symbol + '.csv', 'w+') as csvfile:
+              pass
+            csvfile.close()
 
-        csvfile.close()
+            first_run_done = True
 
-      with open('data/orders.csv', 'w') as csvfile:
-        writer = csv.writer(csvfile)
-        writer.writerows(orders)
-        
+          # append cumulative profit
+          with open('data/trading/profit_' + symbol + '.csv', 'a+') as csvfile:
+            reader = csv.reader(csvfile)
+            data = list(reader)
+            cumulative_profit = math.fsum(data)
+          csvfile.close()
+
+          with open('data/trading/profit_' + symbol + '.csv', 'a+') as csvfile:
+            writer = csv.writer(csvfile)
+            writer.writerow([float(cumulative_profit + profit)])
+          csvfile.close()
+
+          profit_sum = profit_sum + profit
+
+      print('##########################################################################################') 
+      print("Profit: " + str(cumulative_profit))
+      print('##########################################################################################')
+      print()
+
+      print('##########################################################################################')
+      print("##################################  Profit tracked  ######################################")
+      print('##########################################################################################')
+      print()
+
+    def archive_files(self, symbol):
+      files = ['orders_' + symbol + '.csv', 'profit_history_' + symbol + '.csv', 'profit_' + symbol + '.csv', 'order_mapping.csv']
+      file_folder = 'data/trading/'
+
+      archive_folder = 'data/trading/archive'
+
+      # Get current timestamp
+      timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+      # Create folder with timestamp as name
+      os.makedirs(archive_folder + '/' + timestamp)
+      # Iterate through files and move them to the new folder
+      for file in files:
+          if os.path.isfile(file_folder + file):
+              shutil.move(file_folder + file, archive_folder + '/' + timestamp)
+
+      print('##########################################################################################')
+      print("Files have been archived to", archive_folder + '/' + timestamp)
+      print('##########################################################################################')
+      print()
+
+    def clear_files(symbol):
+      with open('data/trading/order_mapping.csv', 'w') as csvfile:
+        csvfile.truncate()
+      csvfile.close()
+
+      with open('data/trading/orders_' + symbol + '.csv', 'w') as csvfile:
+        csvfile.truncate()
+      csvfile.close()
+
+      with open('data/trading/profit_history_' + symbol + '.csv', 'w') as csvfile:
+        csvfile.truncate()
+      csvfile.close()
+
+      with open('data/trading/profit_' + symbol + '.csv', 'w') as csvfile:
+        csvfile.truncate()
       csvfile.close()
 
 
-        
     def get_symbol_info(self, symbol):
         # make a GET request to the API to get the current balance of the trading account
         info = self.client.get_symbol_info(symbol=symbol)
@@ -154,10 +255,6 @@ class TradingBot:
           Lotsize_maxQty = float([i for i in info['filters'] if i['filterType'] == 'LOT_SIZE'][0]['maxQty'])
 
           Lotsize_stepSize = float([i for i in info['filters'] if i['filterType'] == 'LOT_SIZE'][0]['stepSize'])
-
-          print("Minimum Quantity: ", Lotsize_minQty)
-          print("Maximum Quantity: ", Lotsize_maxQty)
-          print("Maximum Stepzie: ", Lotsize_stepSize)
 
         return info
 
@@ -230,14 +327,14 @@ class TradingBot:
     def calc_price(self, price, risk_factor, profit, step_size):
 
         # calculate the stop loss and take profit prices with risk factor
-        stop_loss = price * (1 - risk_factor * profit)
-        take_profit = price * (1 + profit)
+        oco_price_low = price * (1 - risk_factor * profit)
+        oco_price_high = price * (1 + profit)
 
         price = round_step_size(price, step_size)
-        stop_loss = round_step_size(stop_loss, step_size)
-        take_profit = round_step_size(take_profit, step_size)
+        oco_price_low = round_step_size(oco_price_low, step_size)
+        oco_price_high = round_step_size(oco_price_high, step_size)
 
-        return stop_loss, take_profit
+        return oco_price_low, oco_price_high
 
 
     def place_order(self, symbol, side, profit, risk_factor, investment_percentage):
@@ -262,15 +359,20 @@ class TradingBot:
             return None
 
         # calculate the stop loss and take profit prices with risk factor
-        stop_loss = price * (1 - risk_factor * profit)
-        take_profit = price * (1 + profit)
+        oco_price_low = price * (1 - risk_factor * profit)
+        oco_price_high = price * (1 + profit)
 
         # round the prices to the nearest tick size
         price = round_step_size(price, tick_size)
-        stop_loss = round_step_size(stop_loss, tick_size)
-        take_profit = round_step_size(take_profit, tick_size)
+        oco_price_low = round_step_size(oco_price_low, tick_size)
+        oco_price_high = round_step_size(oco_price_high, tick_size)
 
-        print("Price: ", price, "Stop Loss: ", stop_loss, "Take Profit: ", take_profit)
+        oco_limit_low = round_step_size((oco_price_low + price)/2, tick_size)
+        oco_limit_high = round_step_size((oco_price_high + price)/2, tick_size)
+
+        print('##########################################################################################')
+        print("Price: ", price, "Stop Loss: ", oco_price_low, "Take Profit: ", oco_price_high)
+        print("Limit Stop Loss: ", oco_limit_low, "Limit Take Profit: ", oco_limit_high)
         print("Min Price: ", min_price, "Max Price: ", max_price, "Tick Size: ", tick_size)
 
         # calculate quantity
@@ -292,17 +394,37 @@ class TradingBot:
 
         print("Min Quantity: ", min_qty, "Max Quantity: ", max_qty, "Step Size: ", step_size)
         print("Quantity: ", quantity)
+        print('##########################################################################################')
+        print()
 
         # check if enough balance to trade
         if self.check_balance(symbol, price, quantity, 1.1):
+            print('##########################################################################################')
             print("Enough balance to trade")
+            print('##########################################################################################')
+            print()
         else:
+            print('##########################################################################################')
             print("Not enough balance to trade")
+            print('##########################################################################################')
+            print()
             return None
 
         if side == SIDE_BUY:
-            try:
-              test_order = self.client.create_test_order(
+          try:
+            test_order = self.client.create_test_order(
+                symbol=symbol,
+                side=side,
+                type=ORDER_TYPE_LIMIT,
+                quantity=quantity,
+                price=str(price),
+                timeInForce=TIME_IN_FORCE_GTC
+            )
+          except Exception as e:
+              print("An exception occured - {}".format(e))
+              return None
+          try:
+              order = self.client.create_order(
                   symbol=symbol,
                   side=side,
                   type=ORDER_TYPE_LIMIT,
@@ -310,64 +432,23 @@ class TradingBot:
                   price=str(price),
                   timeInForce=TIME_IN_FORCE_GTC
               )
-            except Exception as e:
-                print("An exception occured - {}".format(e))
-                return None
-            try:
-                order = self.client.create_order(
-                    symbol=symbol,
-                    side=side,
-                    type=ORDER_TYPE_LIMIT,
-                    quantity=quantity,
-                    price=str(price),
-                    timeInForce=TIME_IN_FORCE_GTC
-                )
-            except Exception as e:
-                #self.close_failed_orders(symbol, order)
-                print("An exception occured - {}".format(e))
-                return None
-            time.sleep(1)
-            if order != None:
+          except Exception as e:
+              print("An exception occured - {}".format(e))
+              return None
+          if order != None:
               try:
-                  order_sl = self.client.create_order(
-                      symbol=symbol,
-                      side=SIDE_SELL,
-                      type=ORDER_TYPE_LIMIT,
-                      quantity=quantity,
-                      price=str(stop_loss),
-                      timeInForce=TIME_IN_FORCE_GTC
-                  )
-              except Exception as e:
-                  #self.close_failed_orders(symbol, order)
-                  print("An exception occured - {}".format(e))
-                  return None
-              try:
-                test_order_tp = self.client.create_test_order(
+                oco_order = self.client.create_oco_order(
                     symbol=symbol,
                     side=SIDE_SELL,
-                    type=ORDER_TYPE_LIMIT,
                     quantity=quantity,
-                    price=str(take_profit),
-                    timeInForce=TIME_IN_FORCE_GTC
+                    price=str(oco_price_high),
+                    stopPrice=str(oco_price_low),
+                    stopLimitPrice=str(oco_price_low),
+                    stopLimitTimeInForce=TIME_IN_FORCE_GTC,
                 )
               except Exception as e:
                 print("An exception occured - {}".format(e))
-                #self.close_failed_orders(symbol, order, order_sl)
                 return None
-              try:
-                  order_tp = self.client.create_order(
-                      symbol=symbol,
-                      side=SIDE_SELL,
-                      type=ORDER_TYPE_LIMIT,
-                      quantity=quantity,
-                      price=str(take_profit),
-                      timeInForce=TIME_IN_FORCE_GTC
-                  )
-              except Exception as e:
-                #self.close_failed_orders(symbol, order, order_sl)
-                print("An exception occured - {}".format(e))
-                return None
-
         elif side == SIDE_SELL:
           try:
             test_order = self.client.create_test_order(
@@ -393,88 +474,31 @@ class TradingBot:
           except Exception as e:
               print("An exception occured - {}".format(e))
               return None
-          time.sleep(1)
           if order != None:
             try:
-              test_order_sl = self.client.create_test_order(
+              oco_order = self.client.create_oco_order(
                   symbol=symbol,
                   side=SIDE_BUY,
-                  type=ORDER_TYPE_LIMIT,
                   quantity=quantity,
-                  price=str(stop_loss),
-                  timeInForce=TIME_IN_FORCE_GTC
+                  price=str(oco_price_low),
+                  stopPrice=str(oco_price_high),
+                  stopLimitPrice=str(oco_price_high),
+                  stopLimitTimeInForce=TIME_IN_FORCE_GTC,
               )
             except Exception as e:
-                #self.close_failed_orders(symbol, order)
-                print("An exception occured - {}".format(e))
-                return None
-            try:
-                order_sl = self.client.create_order(
-                    symbol=symbol,
-                    side=SIDE_BUY,
-                    type=ORDER_TYPE_LIMIT,
-                    quantity=quantity,
-                    price=str(stop_loss),
-                    timeInForce=TIME_IN_FORCE_GTC
-                )
-            except Exception as e:
-                #self.close_failed_orders(symbol, order)
-                print("An exception occured - {}".format(e))
-                return None
-            try:
-              test_order_tp = self.client.create_test_order(
-                  symbol=symbol,
-                  side=SIDE_BUY,
-                  type=ORDER_TYPE_LIMIT,
-                  quantity=quantity,
-                  price=str(take_profit),
-                  timeInForce=TIME_IN_FORCE_GTC
-              )
-            except Exception as e:
-                #self.close_failed_orders(symbol, order, order_sl)
-                print("An exception occured - {}".format(e))
-                return None
-            try:
-                order_tp = self.client.create_order(
-                    symbol=symbol,
-                    side=SIDE_BUY,
-                    type=ORDER_TYPE_LIMIT,
-                    quantity=quantity,
-                    price=str(take_profit),
-                    timeInForce=TIME_IN_FORCE_GTC
-                )
-            except Exception as e:
-                #self.close_failed_orders(symbol, order, order_sl)
                 print("An exception occured - {}".format(e))
                 return None
 
-        with open('data/order_mapping.csv', 'a') as csvfile:
-            writer = csv.writer(csvfile)
-            writer.writerow([symbol, order['orderId'], order_sl['orderId'], order_tp['orderId']])
+        if order != None and oco_order != None:
+          with open('data/trading/order_mapping.csv', 'a+') as csvfile:
+              writer = csv.writer(csvfile)
+              writer.writerow([symbol, order['orderId'], oco_order['orders'][0]['orderId'], oco_order['orders'][1]['orderId']])
+          csvfile.close()
+        else: 
+          self.cancel_failed_orders(symbol, order, oco_order)
+          return None
 
-        csvfile.close()
-
-        return [order, order_sl, order_tp]
-
-    def close_failed_orders(self, order=None, order_sl=None, order_tp=None):
-        if order != None:
-            try:
-                self.client.cancel_order(symbol=order['symbol'], orderId=order['orderId'])
-            except Exception as e:
-                print("An exception occured - {}".format(e))
-                return None
-        if order_sl != None:
-            try:
-                self.client.cancel_order(symbol=order_sl['symbol'], orderId=order_sl['orderId'])
-            except Exception as e:
-                print("An exception occured - {}".format(e))
-                return None
-        if order_tp != None:
-            try:
-                self.client.cancel_order(symbol=order_tp['symbol'], orderId=order_tp['orderId'])
-            except Exception as e:
-                print("An exception occured - {}".format(e))
-                return None
+        return [order, oco_order]
 
     # create a function that listens for data from a websocket and puts it in a CSV file
     def listen_to_websocket(self):
@@ -493,11 +517,6 @@ class TradingBot:
 
     # create a function that processes data from the queue and makes trading decisions
     def process_data(self, symbol, timeframe, ticks, profit, risk_factor, investment_percentage, trades):
-
-        with open('data/order_mapping.csv', 'w') as csvfile:
-            csvfile.truncate()
-
-        csvfile.close()
 
         data_length = 0
 
@@ -522,6 +541,7 @@ class TradingBot:
             # get macd sentiment
             macd = macd_strategy(all_data)
             macd_signal = macd['Signal'].iloc[-1]
+            print('##########################################################################################')
             print("MACD-Signal:", macd_signal, "MACD:", macd['MACD'].iloc[-1])
 
             # calculate the RSI
@@ -566,10 +586,6 @@ class TradingBot:
                 print('##########################################################################################')
                 print("Order ID:", order[0]['orderId'], "Number of trades left:", num_of_trades)
                 print('##########################################################################################')
-                print("Stop Loss Order ID:", order[1]['orderId'])
-                print('##########################################################################################')
-                print("Take Profit Order ID:", order[2]['orderId'])
-                print('##########################################################################################')
                 print()
               else:
                 print('##########################################################################################')
@@ -578,29 +594,27 @@ class TradingBot:
                 print()
             # wait for the next tick
             time.sleep(self.tickrate(timeframe))
-
-            # update the orders.csv file
-            self.track_trades()
           
         print('##########################################################################################')
         print("###################################  Trading finished  ###################################")
         print('##########################################################################################')
+        print()
 
+    def cancel_failed_orders(self, order, order_oco):
+        if order == None:
+          self.client.cancel_order(symbol=order_oco['symbol'], orderId=order_oco['orderId'])
+        if order_oco == None:
+          self.client.cancel_order(symbol=order['symbol'], orderId=order['orderId'])
 
     def reset(self):
-        # delete all rows orders.csv
-        with open('data/orders.csv', 'w') as f:
-          # Truncate the file
-          f.truncate()
-        
-        f.close()
-        
         # close all open orders
         orders = self.client.get_open_orders()
         for order in orders:
           self.client.cancel_order(symbol=order['symbol'], orderId=order['orderId'])
-
-        print("All orders closed")
+        print('##########################################################################################')
+        print("##################################  All orders closed  ###################################")
+        print('##########################################################################################')
+        print()
 
     def tickrate(self, timeframe):
           if timeframe == "1s":
