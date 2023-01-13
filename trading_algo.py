@@ -547,11 +547,18 @@ class TradingBot:
           self.client.cancel_order(symbol=order['symbol'], orderId=order['orderId'])
 
     def cancel_order(self, symbol, order_id):
-        try:
-          self.client.cancel_order(symbol=symbol, orderId=order_id)
-        except:
-          return False
-        return True
+      if symbol == "":
+        all_orders = self.client.get_all_orders(symbol, orderId=order_id)
+        for order in all_orders:
+          try:
+            self.client.cancel_order(symbol=symbol, orderId=order_id)
+          except:
+            return False
+      try:
+        self.client.cancel_order(symbol=symbol, orderId=order_id)
+      except:
+        return False
+      return True
 
     def get_open_orders(self):
         # get every open orders from orders.csv

@@ -2,7 +2,6 @@
 from trading_algo import TradingBot
 from multiprocessing import Process
 from secret import TEST_API_KEY, TEST_SECRET_KEY
-import stream.db as db
 import time
 
 if __name__ == '__main__':
@@ -40,7 +39,9 @@ if __name__ == '__main__':
     print("3. Open Orders")
     print("4. All Orders")
     print("5. Cancel Order")
-    print("6. Exit")
+    print("6. Reset Bot")
+    print("7. Balance")
+    print("8. Exit")
     option = input("Enter the number corresponding to your choice: ")
     print('##########################################################################################')
     print()
@@ -144,8 +145,15 @@ if __name__ == '__main__':
       bot.archive_files(symbol)
       print('##########################################################################################')
       print()
-      break
+      continue
     elif option == "7":
+      print('##########################################################################################')
+      print("You selected Balance.")
+      bot.get_account_balance()
+      print('##########################################################################################')
+      print()
+      continue
+    elif option == "8":
       print('##########################################################################################')
       print("You selected Exit.")
       print('##########################################################################################')
