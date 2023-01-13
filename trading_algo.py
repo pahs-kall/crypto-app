@@ -1,4 +1,3 @@
-import json
 from constants import *
 from strategies.macd import macd_strategy
 from strategies.rsi import calculate_rsi, decide_on_order
@@ -12,7 +11,6 @@ import math
 import shutil
 import pandas as pd
 from datetime import datetime
-import websocket
 from threading import Thread
 from binance.helpers import round_step_size
 
@@ -65,21 +63,6 @@ class TradingBot:
         for symbol in exchange_info.get('symbols'):
             if symbol.get('symbol') == pair:
                 return symbol.get('baseAsset')
-
-    def calculate_order_size(self, symbol, investment_percentage):
-        # get the current balance of the trading account
-        balance = self.client.get_asset_balance(asset=self.get_asset(symbol))
-
-        # get investment amount for investment percentage
-        investment = float(balance['free']) * investment_percentage
-
-        # get the current price of the symbol
-        price = self.client.get_symbol_ticker(symbol=symbol)
-
-        # calculate the order size for investment for take profit price
-        order_size = investment / float(price['price'])
-
-        return order_size
 
     def track_trades(self):
       with open('data/trading/order_mapping.csv', 'r') as csvfile:
@@ -138,9 +121,7 @@ class TradingBot:
             if oco_order_low['status'] == 'FILLED':
               profit = float(oco_order_low['cummulativeQuoteQty']) - float(order_orig['cummulativeQuoteQty'])
               message = "Loss: " + str(profit) + " trading " + symbol + " on " + order_orig['side'] + " with " + order_orig['price'] + " sold at " + oco_order_low['price']
-            else:
-              non_tracked_orders += 1
-            if oco_order_high['status'] == 'FILLED':
+            elif oco_order_high['status'] == 'FILLED':
               profit = float(oco_order_high['cummulativeQuoteQty']) - float(order_orig['cummulativeQuoteQty'])
               message = "Profit: " + str(profit) + " trading " + symbol + " on " + order_orig['side'] + " with " + order_orig['price'] + " sold at " + oco_order_high['price']
             else:
@@ -149,9 +130,7 @@ class TradingBot:
             if oco_order_low['status'] == 'FILLED':
               profit = float(order_orig['cummulativeQuoteQty']) - float(oco_order_low['cummulativeQuoteQty'])
               message = "Loss: " + str(profit) + " trading " + symbol + " on " + order_orig['side'] + " with " + order_orig['price'] + " bought at " + oco_order_low['price']
-            else:
-              non_tracked_orders += 1
-            if oco_order_high['status'] == 'FILLED':
+            elif oco_order_high['status'] == 'FILLED':
               profit = float(order_orig['cummulativeQuoteQty']) - float(oco_order_high['cummulativeQuoteQty'])
               message = "Profit: " + str(profit) + " trading " + symbol + " on " + order_orig['side'] + " with " + order_orig['price'] + " bought at " + oco_order_high['price']
             else:
@@ -226,24 +205,6 @@ class TradingBot:
       print('##########################################################################################')
       print()
 
-    def clear_files(symbol):
-      with open('data/trading/order_mapping.csv', 'w') as csvfile:
-        csvfile.truncate()
-      csvfile.close()
-
-      with open('data/trading/orders_' + symbol + '.csv', 'w') as csvfile:
-        csvfile.truncate()
-      csvfile.close()
-
-      with open('data/trading/profit_history_' + symbol + '.csv', 'w') as csvfile:
-        csvfile.truncate()
-      csvfile.close()
-
-      with open('data/trading/profit_' + symbol + '.csv', 'w') as csvfile:
-        csvfile.truncate()
-      csvfile.close()
-
-
     def get_symbol_info(self, symbol):
         # make a GET request to the API to get the current balance of the trading account
         info = self.client.get_symbol_info(symbol=symbol)
@@ -280,49 +241,24 @@ class TradingBot:
 
         return df
 
-    def get_open_orders(self):
-        # get every open orders from orders.csv
-        open_orders = self.client.get_open_orders()
-
-        return open_orders
-
-    def get_all_orders(self):
-        # get every open orders from orders.csv
-        tickers = self.client.get_all_tickers()
-        symbols = []
-
-        for symbol in tickers:
-            print(symbol['symbol'])
-            symbols.append(symbol['symbol'])
-
-        while True:
-          symbol = input("Select for which symbol you want to see the orders: ")
-          if symbol in symbols:
-              all_orders = self.client.get_all_orders(symbol=symbol)
-              break
-          else:
-              print("Symbol not found!")
-              continue
-
-        return all_orders
-
-    def close_all_orders(self):
-        # get every open orders from orders.csv
-        open_orders = self.client.get_open_orders()
-
-        # close all open orders
-        for order in open_orders:
-            self.client.cancel_order(symbol=order['symbol'], orderId=order['orderId'])
-
-    def check_balance(self, symbol, price, quantity, buffer):
+    def check_balance(self, symbol, quantity, buffer):
         # make a GET request to the API to get the current balance of the trading account
         balance = self.client.get_asset_balance(asset=self.get_asset(symbol))
 
         # check if enough balance to trade
-        if float(balance['free']) > (price * quantity * buffer):
+        if float(balance['free']) > (quantity * buffer):
             return True
         else:
             return False
+
+    def calculate_order_size(self, symbol, investment_percentage):
+        # get the current balance of the trading account
+        balance = self.client.get_asset_balance(asset=self.get_asset(symbol))
+
+        # get investment amount for investment percentage
+        investment = float(balance['free']) * investment_percentage
+
+        return investment
 
     def calc_price(self, price, risk_factor, profit, step_size):
 
@@ -383,6 +319,7 @@ class TradingBot:
         max_qty = float([i for i in symbol_info['filters'] if i['filterType'] == 'LOT_SIZE'][0]['maxQty'])
         step_size = float([i for i in symbol_info['filters'] if i['filterType'] == 'LOT_SIZE'][0]['stepSize'])
 
+
         quantity = round_step_size(quantity, step_size)
 
         # set quantity to minimum if it is less than minimum and maximum if it is more than maximum
@@ -398,7 +335,7 @@ class TradingBot:
         print()
 
         # check if enough balance to trade
-        if self.check_balance(symbol, price, quantity, 1.1):
+        if self.check_balance(symbol, quantity, 1.1):
             print('##########################################################################################')
             print("Enough balance to trade")
             print('##########################################################################################')
@@ -564,6 +501,9 @@ class TradingBot:
             # get the current price
             price = self.client.get_symbol_ticker(symbol=symbol)['price']
 
+            # create folder if it does not exist
+            os.makedirs('data/indicators/' + timeframe, exist_ok=True)
+            
             # save price, side, rsi and macd to csv file
             with open('data/indicators/' + timeframe + '/indicator_data_' + symbol + '_' + timeframe + '.csv', 'a+') as csvfile:
               writer = csv.writer(csvfile)
@@ -606,15 +546,38 @@ class TradingBot:
         if order_oco == None:
           self.client.cancel_order(symbol=order['symbol'], orderId=order['orderId'])
 
-    def reset(self):
-        # close all open orders
-        orders = self.client.get_open_orders()
-        for order in orders:
-          self.client.cancel_order(symbol=order['symbol'], orderId=order['orderId'])
-        print('##########################################################################################')
-        print("##################################  All orders closed  ###################################")
-        print('##########################################################################################')
-        print()
+    def cancel_order(self, symbol, order_id):
+        try:
+          self.client.cancel_order(symbol=symbol, orderId=order_id)
+        except:
+          return False
+        return True
+
+    def get_open_orders(self):
+        # get every open orders from orders.csv
+        open_orders = self.client.get_open_orders()
+
+        return open_orders
+
+    def get_all_orders(self):
+        # get every open orders from orders.csv
+        tickers = self.client.get_all_tickers()
+        symbols = []
+
+        for symbol in tickers:
+            print(symbol['symbol'])
+            symbols.append(symbol['symbol'])
+
+        while True:
+          symbol = input("Select for which symbol you want to see the orders: ")
+          if symbol in symbols:
+              all_orders = self.client.get_all_orders(symbol=symbol)
+              break
+          else:
+              print("Symbol not found!")
+              continue
+
+        return all_orders
 
     def tickrate(self, timeframe):
           if timeframe == "1s":
@@ -657,48 +620,3 @@ class TradingBot:
             return 604800
           elif timeframe == "1M":
             return 2592000
-
-    def timeframe(self, tickrate):
-          if tickrate == 1:
-            return "1s"
-          elif tickrate == 3:
-            return "3s"
-          elif tickrate == 5:
-            return "5s"
-          elif tickrate == 15:
-            return "15s"
-          elif tickrate == 30:
-            return "30s"
-          elif tickrate == 60:
-            return "1m"
-          elif tickrate == 180:
-            return "3m"
-          elif tickrate == 300:
-            return "5m"
-          elif tickrate == 900:
-            return "15m"
-          elif tickrate == 1800:
-            return "30m"
-          elif tickrate == 3600:
-            return "1h"
-          elif tickrate == 7200:
-            return "2h"
-          elif tickrate == 14400:
-            return "4h"
-          elif tickrate == 21600:
-            return "6h"
-          elif tickrate == 28800:
-            return "8h"
-          elif tickrate == 43200:
-            return "12h"
-          elif tickrate == 86400:
-            return "1d"
-          elif tickrate == 259200:
-            return "3d"
-          elif tickrate == 604800:
-            return "1w"
-          elif tickrate == 2592000:
-            return "1M"
-
-
-    

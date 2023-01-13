@@ -1,7 +1,4 @@
-import sys
 import websocket
-import datetime
-import stream.db as db
 import stream.csv_handler as csv_handler
 
 def on_message(ws, message):

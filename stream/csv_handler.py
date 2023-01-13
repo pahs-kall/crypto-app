@@ -9,10 +9,6 @@ def log_csv(message):
 
         symbol = k["s"]
         interval = k["i"]
-        close = float(k["c"])
-        high = float(k["h"])
-        low = float(k["l"])
-        time = int(k["t"])
 
         if not os.path.exists('data/' + interval):
             os.makedirs('data/' + interval)

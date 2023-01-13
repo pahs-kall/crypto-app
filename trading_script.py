@@ -39,7 +39,8 @@ if __name__ == '__main__':
     print("2. Track Orders")
     print("3. Open Orders")
     print("4. All Orders")
-    print("5. Exit")
+    print("5. Cancel Order")
+    print("6. Exit")
     option = input("Enter the number corresponding to your choice: ")
     print('##########################################################################################')
     print()
@@ -59,8 +60,8 @@ if __name__ == '__main__':
       profit_input = input("Enter the profit in percent (default = 1%): ")
       profit = float(profit_input)/100 if profit_input else 0.01
 
-      risk_factor_input = input("Enter the risk factor (0.5 = 50% risk -> 2 take-profit / 1 stop-loss, default = 1.0): ")
-      risk_factor = float(risk_factor_input) if risk_factor_input else 1.0
+      risk_factor_input = input("Enter the risk factor (0.5 = 50% risk -> 2 take-profit / 1 stop-loss, default = 0.5): ")
+      risk_factor = float(risk_factor_input) if risk_factor_input else 0.5
 
       investment_percentage_input = input("Enter the investment percentage (0.5 = 50% of the account balance, default = 0.5): ")
       investment_percentage = float(investment_percentage_input) if investment_percentage_input else 0.5
@@ -95,7 +96,7 @@ if __name__ == '__main__':
       print()
       bot.track_trades()
       non_tracked_orders = bot.track_profit(symbol)
-      if non_tracked_orders != 0:
+      if non_tracked_orders != None:
         print('##########################################################################################')
         print ("There are still ", non_tracked_orders, " non tracked orders. Please wait until they are tracked.")
         print('##########################################################################################')
@@ -109,7 +110,7 @@ if __name__ == '__main__':
       print("You selected Open Orders.")
       open_orders = bot.get_open_orders()
       for order in open_orders:
-        print("Order: \n", "Symbol: ", order['symbol'], "Price: ", order['price'], "Quantity: ", order['origQty'], "Side: ", order['side'], "Status: ", order['status'])
+        print("Order: \n", "OrderId: ", order['orderId'], "Symbol: ", order['symbol'], "Price: ", order['price'], "Quantity: ", order['origQty'], "Side: ", order['side'], "Status: ", order['status'])
       print('##########################################################################################')
       print()
       continue
@@ -118,11 +119,33 @@ if __name__ == '__main__':
       print("You selected All Orders.")
       all_orders = bot.get_all_orders()
       for order in all_orders:
-        print("Order: \n", "Symbol: ", order['symbol'], order['type'], "Price: ", order['price'], "Quantity: ", order['origQty'], "Side: ", order['side'], "Status: ", order['status'])
+        print("Order: \n", "OrderId: ", order['orderId'], "Symbol: ", order['symbol'], order['type'], "Price: ", order['price'], "Quantity: ", order['origQty'], "Side: ", order['side'], "Status: ", order['status'])
       print('##########################################################################################')
       print()
       continue
     elif option == "5":
+      print('##########################################################################################')
+      print("You selected Cancel Order.")
+      print("Make sure you know the orderId and the symbol you want to cancel and that the order is still open.")
+      order_id = input("Enter the order id: ")
+      symbol = input("Enter the symbol: ")
+      canceled = bot.cancel_order(symbol, order_id)
+      if canceled:
+        print("Order canceled.")
+      else:
+        print("Order could not be canceled.")
+      print('##########################################################################################')
+      print()
+      continue
+    elif option == "6":
+      print('##########################################################################################')
+      print("You selected Reset Bot.")
+      symbol = input("Enter the symbol you want to reset: ")
+      bot.archive_files(symbol)
+      print('##########################################################################################')
+      print()
+      break
+    elif option == "7":
       print('##########################################################################################')
       print("You selected Exit.")
       print('##########################################################################################')
