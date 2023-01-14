@@ -65,18 +65,22 @@ class TradingBot:
                 return symbol.get('baseAsset')
 
     def track_trades(self):
-      with open('data/trading/order_mapping.csv', 'r') as csvfile:
-        reader = csv.reader(csvfile)
-        order_mapping = list(reader)
-      csvfile.close()
+      filename = 'data/trading/order_mapping.csv'
+
+      df = pd.read_csv(filename, header=None)
+      order_mapping = df.values.tolist()
       
+
+      print(order_mapping)
       orders = []
       symbol = ""
       
-      # iterate through orders and check status
+      # ite3rate through orders and check status
       for order in order_mapping:
         if order != []:
           symbol = order[0]
+
+          print(order)
 
           order_orig = self.client.get_order(symbol=symbol, orderId=int(order[1]))
           oco_order_low = self.client.get_order(symbol=symbol, orderId=int(order[2]))
@@ -84,10 +88,10 @@ class TradingBot:
 
           new_order = [order_orig['orderId'], order_orig['status'], order_orig['origQty'], order_orig['price'], order_orig['side'], oco_order_low['orderId'], oco_order_low['status'], oco_order_high['orderId'], oco_order_high['status']]
           
-          with open('data/trading/orders_' + symbol + '.csv', 'a+') as csvfile:
-            writer = csv.writer(csvfile)
-            writer.writerow(new_order)
-          csvfile.close()
+          filename = 'data/trading/orders_' + symbol + '.csv'
+
+          df = pd.DataFrame([new_order])
+          df.to_csv(filename, mode='a', header=False, index=False)
 
       print('##########################################################################################')
       print("##################################  Orders tracked  ######################################")
@@ -95,88 +99,84 @@ class TradingBot:
       print()
 
     def track_profit(self, symbol):
-      with open('data/trading/orders_' + symbol + '.csv', 'r') as csvfile:
-        reader = csv.reader(csvfile)
-        orders = list(reader)
+      filename = 'data/trading/orders_' + symbol + '.csv'
 
-      csvfile.close()
-
-      first_run_done = False
+      df = pd.read_csv(filename, header=None)
+      orders = df.values.tolist()
+      num_of_orders = len(orders)
 
       profit_sum = 0
+      messages = []
 
-      # iterate through orders and check status
-      for order in orders:
-        if order != []:
+      filename = 'data/trading/profit_' + symbol + '.csv'
+      pd.DataFrame().to_csv(filename, mode='w+', index=False)
 
-          message = ''
-          profit = 0
-          non_tracked_orders = 0
+        # iterate through orders and check status
+      while num_of_orders > 0:
+        for order in orders:
+          if order != []:
 
-          order_orig = self.client.get_order(symbol=symbol, orderId=order[0])
-          oco_order_low = self.client.get_order(symbol=symbol, orderId=order[5])
-          oco_order_high = self.client.get_order(symbol=symbol, orderId=order[7])
+            message = ''
+            profit = 0
 
-          if order_orig['status'] == 'FILLED' and order_orig['side'] == 'BUY':
-            if oco_order_low['status'] == 'FILLED':
-              profit = float(oco_order_low['cummulativeQuoteQty']) - float(order_orig['cummulativeQuoteQty'])
-              message = "Loss: " + str(profit) + " trading " + symbol + " on " + order_orig['side'] + " with " + order_orig['price'] + " sold at " + oco_order_low['price']
-            elif oco_order_high['status'] == 'FILLED':
-              profit = float(oco_order_high['cummulativeQuoteQty']) - float(order_orig['cummulativeQuoteQty'])
-              message = "Profit: " + str(profit) + " trading " + symbol + " on " + order_orig['side'] + " with " + order_orig['price'] + " sold at " + oco_order_high['price']
-            else:
-              non_tracked_orders += 1
-          elif order_orig['status'] == 'FILLED' and order_orig['side'] == 'SELL':
-            if oco_order_low['status'] == 'FILLED':
-              profit = float(order_orig['cummulativeQuoteQty']) - float(oco_order_low['cummulativeQuoteQty'])
-              message = "Loss: " + str(profit) + " trading " + symbol + " on " + order_orig['side'] + " with " + order_orig['price'] + " bought at " + oco_order_low['price']
-            elif oco_order_high['status'] == 'FILLED':
-              profit = float(order_orig['cummulativeQuoteQty']) - float(oco_order_high['cummulativeQuoteQty'])
-              message = "Profit: " + str(profit) + " trading " + symbol + " on " + order_orig['side'] + " with " + order_orig['price'] + " bought at " + oco_order_high['price']
-            else:
-              non_tracked_orders += 1
+            order_orig = self.client.get_order(symbol=symbol, orderId=order[0])
+            oco_order_low = self.client.get_order(symbol=symbol, orderId=order[5])
+            oco_order_high = self.client.get_order(symbol=symbol, orderId=order[7])
 
-          if non_tracked_orders != 0:
-            return non_tracked_orders
+            if order_orig['status'] == 'FILLED' and order_orig['side'] == 'BUY':
+              if oco_order_low['status'] == 'FILLED':
+                profit = float(oco_order_low['cummulativeQuoteQty']) - float(order_orig['cummulativeQuoteQty'])
+                message = "Loss: " + str(profit) + " trading " + symbol + " on " + order_orig['side'] + " with " + order_orig['price'] + " sold at " + oco_order_low['price']
+                num_of_orders -= 1
+              elif oco_order_high['status'] == 'FILLED':
+                profit = float(oco_order_high['cummulativeQuoteQty']) - float(order_orig['cummulativeQuoteQty'])
+                message = "Profit: " + str(profit) + " trading " + symbol + " on " + order_orig['side'] + " with " + order_orig['price'] + " sold at " + oco_order_high['price']
+                num_of_orders -= 1
+            elif order_orig['status'] == 'FILLED' and order_orig['side'] == 'SELL':
+              if oco_order_low['status'] == 'FILLED':
+                profit = float(order_orig['cummulativeQuoteQty']) - float(oco_order_low['cummulativeQuoteQty'])
+                message = "Loss: " + str(profit) + " trading " + symbol + " on " + order_orig['side'] + " with " + order_orig['price'] + " bought at " + oco_order_low['price']
+                num_of_orders -= 1
+              elif oco_order_high['status'] == 'FILLED':
+                profit = float(order_orig['cummulativeQuoteQty']) - float(oco_order_high['cummulativeQuoteQty'])
+                message = "Profit: " + str(profit) + " trading " + symbol + " on " + order_orig['side'] + " with " + order_orig['price'] + " bought at " + oco_order_high['price']
+                num_of_orders -= 1
 
-          if message == '':
-            return None
+            print("message: " + message)
+            print("profit: " + str(profit))
 
-          if profit == 0:
-            return None
+            if message == '':
+              continue
 
-          # append order to profit history
-          with open('data/trading/profit_history_' + symbol + '.csv', 'a+') as csvfile:
-            writer = csv.writer(csvfile)
-            writer.writerow([message])
-          csvfile.close()
+            if profit == 0:
+              continue
 
-          cumulative_profit = 0
+            # append order to profit history
+            filename = 'data/trading/profit_history_' + symbol + '.csv'
 
-          if not first_run_done:
-            # create file if not exists
-            with open('data/trading/profit_' + symbol + '.csv', 'w+') as csvfile:
-              pass
-            csvfile.close()
+            df = pd.DataFrame([[message]], columns=['message'])
+            df.to_csv(filename, mode='a', header=False, index=False)
 
-            first_run_done = True
 
-          # append cumulative profit
-          with open('data/trading/profit_' + symbol + '.csv', 'a+') as csvfile:
-            reader = csv.reader(csvfile)
-            data = list(reader)
-            cumulative_profit = math.fsum(data)
-          csvfile.close()
+            filename = 'data/trading/profit_' + symbol + '.csv'
+            # append the new profit to the file
+            df = pd.DataFrame([profit])
+            df.to_csv(filename, mode='a+', header=False, index=False)
 
-          with open('data/trading/profit_' + symbol + '.csv', 'a+') as csvfile:
-            writer = csv.writer(csvfile)
-            writer.writerow([float(cumulative_profit + profit)])
-          csvfile.close()
+            # read the current cumulative profit from file
+            df = pd.read_csv(filename, header=None)
+            cumulative_profit = df.sum()
 
-          profit_sum = profit_sum + profit
+            profit_sum = cumulative_profit
+
+              
+            if num_of_orders == 0:
+              break
+            else :
+              continue
 
       print('##########################################################################################') 
-      print("Profit: " + str(cumulative_profit))
+      print("Profit: " + str(profit_sum))
       print('##########################################################################################')
       print()
 
@@ -221,23 +221,9 @@ class TradingBot:
 
     def get_all_data_from_csv(self, symbol, timeframe, ticks):
         # read the CSV file and get all the data from the last nth ticks
-        with open('data/' + timeframe + '/trading_data_' + symbol + '_' + timeframe + '.csv', 'r') as csvfile:
-            reader = csv.reader(csvfile)
-            data = list(reader)[-ticks:]
-
-        pd_data = pd.read_csv('data/' + timeframe + '/trading_data_' + symbol + '_' + timeframe + '.csv').tail(ticks).values.tolist()
-
-        # convert the data to a DataFrame
-        df = pd.DataFrame(pd_data, columns=['event_time', 'symbol', 'start_time', 'end_time', 'open', 'close', 'high', 'low', 'volume', 'number_of_trades', 'quote_volume', 'volume_of_active_buy', 'quote_volume_of_active_buy'])
-
-        df['close'].astype(float)
-        df['high'].astype(float)
-        df['low'].astype(float)
-        df['volume'].astype(float)
-        df['number_of_trades'].astype(float)
-        df['quote_volume'].astype(float)
-        df['volume_of_active_buy'].astype(float)
-        df['quote_volume_of_active_buy'].astype(float)
+        filename = 'data/' + timeframe + '/trading_data_' + symbol + '_' + timeframe + '.csv'
+        
+        df = pd.read_csv(filename, names=['type', 'symbol', 'start_time', 'end_time', 'open', 'close', 'high', 'low', 'volume', 'number_of_trades', 'quote_volume', 'volume_of_active_buy', 'quote_volume_of_active_buy']).tail(ticks)
 
         return df
 
@@ -427,10 +413,10 @@ class TradingBot:
                 return None
 
         if order != None and oco_order != None:
-          with open('data/trading/order_mapping.csv', 'a+') as csvfile:
-              writer = csv.writer(csvfile)
-              writer.writerow([symbol, order['orderId'], oco_order['orders'][0]['orderId'], oco_order['orders'][1]['orderId']])
-          csvfile.close()
+          filename = 'data/trading/order_mapping.csv'
+
+          df = pd.DataFrame([[symbol, order['orderId'], oco_order['orders'][0]['orderId'], oco_order['orders'][1]['orderId']]], columns=['symbol', 'orderId', 'oco_order_1', 'oco_order_2'])
+          df.to_csv(filename, mode='a', header=False, index=False)
         else: 
           self.cancel_failed_orders(symbol, order, oco_order)
           return None
@@ -461,18 +447,14 @@ class TradingBot:
 
         while data_length < ticks:
           # get number of rows in the csv file that are valid and from recent responsens
-          with open('data/' + timeframe + '/trading_data_' + symbol + '_' + timeframe + '.csv', 'r') as csvfile:
-              reader = csv.reader(csvfile)
-              data = list(reader)[-ticks:]
-              data_length = len(data)
+          filename = 'data/' + timeframe + '/trading_data_' + symbol + '_' + timeframe + '.csv'
+          df = pd.read_csv(filename)
+          data = df.tail(ticks)
+          data_length = len(data)
 
         while num_of_trades > 0:
 
-            # get the data from the csv file
-            with open('data/' + timeframe + '/trading_data_' + symbol + '_' + timeframe + '.csv', 'r') as csvfile:
-                reader = csv.reader(csvfile)
-                data = list(reader)[-ticks:]
-            
+            # get all data from the csv file
             all_data = self.get_all_data_from_csv(symbol, timeframe, ticks)['close'].astype(float)
 
             # get macd sentiment
@@ -505,18 +487,9 @@ class TradingBot:
             os.makedirs('data/indicators/' + timeframe, exist_ok=True)
             
             # save price, side, rsi and macd to csv file
-            with open('data/indicators/' + timeframe + '/indicator_data_' + symbol + '_' + timeframe + '.csv', 'a+') as csvfile:
-              writer = csv.writer(csvfile)
-
-              # Read all rows of the CSV file into a list
-              #csvfile.seek(0)
-              #rows = list(csv.reader(csvfile))
-
-              # Get the last row
-              #last_row = rows[-1] if rows else None
-
-              #if last_row is None or str(rsi.iloc[-1]) != last_row[2]:
-              writer.writerow([price, side, rsi.iloc[-1], macd['MACD'].iloc[-1]])
+            filename = 'data/indicators/' + timeframe + '/indicator_data_' + symbol + '_' + timeframe + '.csv'
+            df = pd.DataFrame([[price, side, rsi.iloc[-1], macd['MACD'].iloc[-1]]], columns=['price', 'side', 'rsi', 'macd'])
+            df.to_csv(filename, mode='a', header=False, index=False)
 
             if side != None:
               # execute the decision

@@ -97,13 +97,13 @@ if __name__ == '__main__':
       print()
       try:
         bot.track_trades()
-        non_tracked_orders = bot.track_profit(symbol)
       except:
         print('##########################################################################################')
         print("Error while tracking trades. Maybe no trades were made yet.")
         print('##########################################################################################')
         print()
         continue
+      non_tracked_orders = bot.track_profit(symbol)
       if non_tracked_orders != None:
         print('##########################################################################################')
         print ("There are still ", non_tracked_orders, " non tracked orders. Please wait until they are tracked.")
