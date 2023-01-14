@@ -4,10 +4,8 @@ from strategies.rsi import calculate_rsi, decide_on_order
 from binance.client import Client
 from binance.enums import *
 from stream.binance_streamer import run_stream
-import csv
 import os
 import time
-import math
 import shutil
 import pandas as pd
 from datetime import datetime
